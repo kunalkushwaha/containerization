@@ -191,10 +191,22 @@ extension EXT4 {
         }
 
         func getExtents(inode: InodeNumber) throws -> [(start: UInt32, end: UInt32)]? {
+            try getFileExtents(inode: inode)?.map { ($0.start, $0.end) }
+        }
+
+        /// The extents of a file with their logical (file) block numbers, so a
+        /// reader can place each one and treat the gaps between them (holes,
+        /// as e2fsprogs writes for zero blocks) as zeros. Unwritten extents
+        /// (`ee_len > 32768`) read as zeros and are left out.
+        func getFileExtents(inode: InodeNumber) throws -> [(logical: UInt32, start: UInt32, end: UInt32)]? {
             let inode = try self.getInode(number: inode)
             let inodeBlock = Data(tupleToArray(inode.block))
             var offset = 0
-            var extents: [(start: UInt32, end: UInt32)] = []
+            var extents: [(logical: UInt32, start: UInt32, end: UInt32)] = []
+            func append(_ leaf: ExtentLeaf) {
+                guard leaf.length <= 32768 else { return }  // unwritten: zeros
+                extents.append((leaf.block, leaf.startLow, leaf.startLow + UInt32(leaf.length)))
+            }
 
             let extentHeaderSize = MemoryLayout<ExtentHeader>.size
             let extentIndexSize = MemoryLayout<ExtentIndex>.size
@@ -214,7 +226,7 @@ extension EXT4 {
                     let leaf = inodeBlock.subdata(in: offset..<offset + extentLeafSize).withUnsafeBytes {
                         $0.loadLittleEndian(as: ExtentLeaf.self)
                     }
-                    extents.append((leaf.startLow, leaf.startLow + UInt32(leaf.length)))
+                    append(leaf)
                     offset += extentLeafSize
                 }
             case 1:
@@ -239,7 +251,7 @@ extension EXT4 {
                         let leaf = block.subdata(in: blockOffset..<blockOffset + extentLeafSize).withUnsafeBytes {
                             $0.loadLittleEndian(as: ExtentLeaf.self)
                         }
-                        extents.append((leaf.startLow, leaf.startLow + UInt32(leaf.length)))
+                        append(leaf)
                         blockOffset += extentLeafSize
                     }
                     offset += extentIndexSize
