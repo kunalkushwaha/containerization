@@ -105,6 +105,19 @@ extension CloudHypervisor {
         public var queueSize: Int?
         /// Optional device identifier.
         public var id: String?
+        /// Back the device with a vhost-user-net backend instead of a TAP.
+        public var vhostUser: Bool?
+        /// The vhost-user backend's Unix socket.
+        public var vhostSocket: String?
+        /// Which side creates the socket: `.client` (the default) connects to
+        /// a socket the backend listens on.
+        public var vhostMode: VhostMode?
+
+        /// Maps to `vhost_mode` in the Cloud Hypervisor OpenAPI spec.
+        public enum VhostMode: String, Sendable, Codable, Equatable {
+            case client = "Client"
+            case server = "Server"
+        }
 
         public init(
             tap: String? = nil,
@@ -114,7 +127,10 @@ extension CloudHypervisor {
             mtu: Int? = nil,
             numQueues: Int? = nil,
             queueSize: Int? = nil,
-            id: String? = nil
+            id: String? = nil,
+            vhostUser: Bool? = nil,
+            vhostSocket: String? = nil,
+            vhostMode: VhostMode? = nil
         ) {
             self.tap = tap
             self.ip = ip
@@ -124,6 +140,9 @@ extension CloudHypervisor {
             self.numQueues = numQueues
             self.queueSize = queueSize
             self.id = id
+            self.vhostUser = vhostUser
+            self.vhostSocket = vhostSocket
+            self.vhostMode = vhostMode
         }
 
         enum CodingKeys: String, CodingKey {
@@ -135,6 +154,9 @@ extension CloudHypervisor {
             case numQueues = "num_queues"
             case queueSize = "queue_size"
             case id
+            case vhostUser = "vhost_user"
+            case vhostSocket = "vhost_socket"
+            case vhostMode = "vhost_mode"
         }
     }
 

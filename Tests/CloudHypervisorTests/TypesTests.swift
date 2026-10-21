@@ -230,6 +230,19 @@ struct TypesTests {
         #expect(object["desired_balloon"] as? Int == 536_870_912)
     }
 
+    @Test("NetConfig encodes a vhost-user backend with Cloud Hypervisor's keys")
+    func netConfigVhostUser() throws {
+        let cfg = CloudHypervisor.NetConfig(mac: "5a:94:ef:e4:0c:ee", vhostUser: true,
+                                            vhostSocket: "/run/net.sock", vhostMode: .client)
+        let data = try JSONEncoder().encode(cfg)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["vhost_user"] as? Bool == true)
+        #expect(object["vhost_socket"] as? String == "/run/net.sock")
+        #expect(object["vhost_mode"] as? String == "Client")
+        #expect(object["tap"] == nil)
+        #expect(try JSONDecoder().decode(CloudHypervisor.NetConfig.self, from: data) == cfg)
+    }
+
     @Test("PciDeviceInfo round-trips through JSON")
     func pciDeviceInfoRoundTrip() throws {
         let info = CloudHypervisor.PciDeviceInfo(id: "disk0", bdf: "0000:00:03.0")
