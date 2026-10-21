@@ -219,6 +219,22 @@ extension LinuxProcess {
 
         var configuredStreams = 0
         let (stream, cc) = AsyncStream<Void>.makeStream()
+        #if os(Linux)
+        // On Linux, swift-corelibs-foundation's `readabilityHandler` (a
+        // dispatch read source) can stop firing when the stream's last data
+        // and its EOF arrive together: the tail is never read, EOF is never
+        // seen, and `waitIoComplete()` gives up after its timeout, silently
+        // dropping output. Read each stream with a blocking read(2) loop on its
+        // own thread until EOF instead.
+        if let stdout = self.ioSetup.stdout, let handle = handles[1] {
+            configuredStreams += 1
+            Self.relayUntilEOF(handle, to: stdout.writer, name: "stdout", logger: self.logger) { cc.yield() }
+        }
+        if let stderr = self.ioSetup.stderr, let handle = handles[2] {
+            configuredStreams += 1
+            Self.relayUntilEOF(handle, to: stderr.writer, name: "stderr", logger: self.logger) { cc.yield() }
+        }
+        #else
         if let stdout = self.ioSetup.stdout {
             configuredStreams += 1
             handles[1]?.readabilityHandler = { handle in
@@ -254,6 +270,7 @@ extension LinuxProcess {
                 }
             }
         }
+        #endif
         if configuredStreams > 0 {
             self.state.withLock {
                 $0.ioTracker = .init(stream: stream, cont: cc, configuredStreams: configuredStreams)
@@ -262,6 +279,38 @@ extension LinuxProcess {
 
         return handles
     }
+
+    #if os(Linux)
+    /// Copies `handle` to `writer` with blocking reads on a dedicated thread
+    /// until EOF (or a read error), then calls `finished` exactly once.
+    private static func relayUntilEOF(
+        _ handle: FileHandle, to writer: any Writer, name: String, logger: Logger?,
+        finished: @escaping @Sendable () -> Void
+    ) {
+        let fd = handle.fileDescriptor
+        let thread = Thread {
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            while true {
+                let count = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+                if count > 0 {
+                    do {
+                        try writer.write(Data(buffer[0..<count]))
+                    } catch {
+                        logger?.error("failed to write to \(name): \(error)")
+                    }
+                    continue
+                }
+                if count < 0 && errno == EINTR { continue }
+                if count < 0 { logger?.error("failed to read \(name): errno \(errno)") }
+                break
+            }
+            withExtendedLifetime(handle) {}
+            finished()
+        }
+        thread.name = "containerization-\(name)-relay"
+        thread.start()
+    }
+    #endif
 
     func startStdinRelay(handle: FileHandle) {
         guard let stdin = self.ioSetup.stdin else { return }
