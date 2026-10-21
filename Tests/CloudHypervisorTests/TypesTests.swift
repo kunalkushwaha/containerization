@@ -191,6 +191,45 @@ struct TypesTests {
         #expect(decoded == cfg)
     }
 
+    @Test("BalloonConfig round-trips through JSON with snake_case keys")
+    func balloonConfigRoundTrip() throws {
+        let cfg = CloudHypervisor.BalloonConfig(size: 268_435_456, deflateOnOom: true, freePageReporting: false)
+        let data = try JSONEncoder().encode(cfg)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(object.keys) == ["size", "deflate_on_oom", "free_page_reporting"])
+        let decoded = try JSONDecoder().decode(CloudHypervisor.BalloonConfig.self, from: data)
+        #expect(decoded == cfg)
+    }
+
+    @Test("VmConfig encodes a balloon only when one is set")
+    func vmConfigBalloonKey() throws {
+        var cfg = CloudHypervisor.VmConfig(
+            cpus: .init(bootVcpus: 1, maxVcpus: 1),
+            memory: .init(size: 1 << 30),
+            payload: .init(kernel: "/vmlinux"),
+            console: .init(mode: .Off),
+            serial: .init(mode: .Off)
+        )
+        let without = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(cfg)) as? [String: Any])
+        #expect(without["balloon"] == nil)
+
+        cfg.balloon = .init(size: 0, deflateOnOom: true)
+        let data = try JSONEncoder().encode(cfg)
+        let with = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let balloon = try #require(with["balloon"] as? [String: Any])
+        #expect(balloon["size"] as? Int == 0)
+        #expect(balloon["deflate_on_oom"] as? Bool == true)
+        #expect(try JSONDecoder().decode(CloudHypervisor.VmConfig.self, from: data) == cfg)
+    }
+
+    @Test("VmResize encodes only the fields that are set, in snake_case")
+    func vmResizeKeys() throws {
+        let data = try JSONEncoder().encode(CloudHypervisor.VmResize(desiredBalloon: 536_870_912))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(object.keys) == ["desired_balloon"])
+        #expect(object["desired_balloon"] as? Int == 536_870_912)
+    }
+
     @Test("PciDeviceInfo round-trips through JSON")
     func pciDeviceInfoRoundTrip() throws {
         let info = CloudHypervisor.PciDeviceInfo(id: "disk0", bdf: "0000:00:03.0")

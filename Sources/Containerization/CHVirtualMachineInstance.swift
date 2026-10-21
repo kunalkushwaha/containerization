@@ -473,6 +473,21 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
         logger?.debug("vsock stdio pool prebound \(pool.count) ports starting at \(Self.stdioPoolBase)")
     }
 
+    /// Set the virtio-balloon's target size: the memory, in bytes, taken back
+    /// from the guest. Requires a balloon device in the `VmConfig` (add one in
+    /// `CHInstanceExtension.configureCH`).
+    public func setBalloonSize(_ bytes: UInt64) async throws {
+        try self.requireRunning()
+        try await chCall { try await self.client.vmResize(CloudHypervisor.VmResize(desiredBalloon: bytes)) }
+    }
+
+    /// The guest memory, in bytes, that the VMM reports as in use after the
+    /// balloon (`memory_actual_size` from `vm.info`), if it reports one.
+    public func memoryActualSize() async throws -> UInt64? {
+        try self.requireRunning()
+        return try await chCall { try await self.client.vmInfo() }.memoryActualSize
+    }
+
     public func hotplug(_ block: Mount, id: String) async throws -> AttachedFilesystem {
         try await hotplug.hotplug(block, id: id)
     }

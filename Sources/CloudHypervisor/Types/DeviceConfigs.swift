@@ -218,6 +218,58 @@ extension CloudHypervisor {
         }
     }
 
+    // MARK: - BalloonConfig
+
+    /// Virtio-balloon configuration.
+    ///
+    /// Maps to `BalloonConfig` in the Cloud Hypervisor OpenAPI spec.
+    public struct BalloonConfig: Sendable, Codable, Equatable {
+        /// Initial balloon size in bytes (memory taken from the guest at boot).
+        public var size: UInt64
+        /// Let the guest deflate the balloon when it runs out of memory.
+        public var deflateOnOom: Bool?
+        /// Let the guest report free pages to the host.
+        public var freePageReporting: Bool?
+
+        public init(size: UInt64, deflateOnOom: Bool? = nil, freePageReporting: Bool? = nil) {
+            self.size = size
+            self.deflateOnOom = deflateOnOom
+            self.freePageReporting = freePageReporting
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case size
+            case deflateOnOom = "deflate_on_oom"
+            case freePageReporting = "free_page_reporting"
+        }
+    }
+
+    // MARK: - VmResize
+
+    /// Request body for resizing a running VM.
+    ///
+    /// Maps to `VmResize` in the Cloud Hypervisor OpenAPI spec.
+    public struct VmResize: Sendable, Codable, Equatable {
+        /// Desired number of vCPUs.
+        public var desiredVcpus: Int?
+        /// Desired guest RAM size in bytes.
+        public var desiredRam: UInt64?
+        /// Desired balloon size in bytes.
+        public var desiredBalloon: UInt64?
+
+        public init(desiredVcpus: Int? = nil, desiredRam: UInt64? = nil, desiredBalloon: UInt64? = nil) {
+            self.desiredVcpus = desiredVcpus
+            self.desiredRam = desiredRam
+            self.desiredBalloon = desiredBalloon
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case desiredVcpus = "desired_vcpus"
+            case desiredRam = "desired_ram"
+            case desiredBalloon = "desired_balloon"
+        }
+    }
+
     // MARK: - PciDeviceInfo
 
     /// PCI device identifier returned by Cloud Hypervisor after device add.

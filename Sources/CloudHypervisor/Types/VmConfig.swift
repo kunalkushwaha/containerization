@@ -28,6 +28,7 @@ extension CloudHypervisor {
         public var net: [NetConfig]?
         public var fs: [FsConfig]?
         public var vsock: VsockConfig?
+        public var balloon: BalloonConfig?
         public var console: ConsoleConfig
         public var serial: ConsoleConfig
 
@@ -39,6 +40,7 @@ extension CloudHypervisor {
             net: [NetConfig]? = nil,
             fs: [FsConfig]? = nil,
             vsock: VsockConfig? = nil,
+            balloon: BalloonConfig? = nil,
             console: ConsoleConfig,
             serial: ConsoleConfig
         ) {
@@ -49,6 +51,7 @@ extension CloudHypervisor {
             self.net = net
             self.fs = fs
             self.vsock = vsock
+            self.balloon = balloon
             self.console = console
             self.serial = serial
         }
@@ -61,6 +64,7 @@ extension CloudHypervisor {
             case net
             case fs
             case vsock
+            case balloon
             case console
             case serial
         }

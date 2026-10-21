@@ -375,6 +375,26 @@ struct ClientTests {
         #expect(result == pciInfo)
     }
 
+    // MARK: - vmResize
+
+    @Test("vmResize sends PUT /api/v1/vm.resize with the desired balloon")
+    func vmResize() async throws {
+        let server = try await StubHTTPServer(eventLoopGroup: Self.group) { _ in
+            StubResponse.status(.noContent)
+        }
+        defer { Task { try? await server.shutdown() } }
+
+        let client = try CloudHypervisor.Client(socketPath: URL(filePath: server.socketPath), eventLoopGroup: Self.group)
+        try await client.vmResize(CloudHypervisor.VmResize(desiredBalloon: 268_435_456))
+
+        let recorded = server.recordedRequests()
+        #expect(recorded.count == 1)
+        #expect(recorded[0].method == .PUT)
+        #expect(recorded[0].uri == "/api/v1/vm.resize")
+        let decoded = try JSONDecoder().decode(CloudHypervisor.VmResize.self, from: recorded[0].body)
+        #expect(decoded == CloudHypervisor.VmResize(desiredBalloon: 268_435_456))
+    }
+
     // MARK: - vmAddVsock
 
     @Test("vmAddVsock sends PUT /api/v1/vm.add-vsock and returns PciDeviceInfo")
