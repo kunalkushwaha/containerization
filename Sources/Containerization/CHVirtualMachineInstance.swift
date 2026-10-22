@@ -43,6 +43,12 @@ public final class CHVirtualMachineInstance: Sendable {
 
     /// VM-instance configuration. Mirrors the macOS `VZVirtualMachineInstance.Configuration`,
     /// minus rosetta / nested-virt (which are macOS-only concepts).
+    /// See `Configuration.stdioListeners`.
+    public enum StdioListenerMode: Sendable, Equatable {
+        case pooled
+        case perStream
+    }
+
     public struct Configuration: Sendable {
         public var cpus: Int
         public var memoryInBytes: UInt64
@@ -52,6 +58,15 @@ public final class CHVirtualMachineInstance: Sendable {
         public var initialFilesystem: Mount?
         public var bootLog: BootLog?
         public var extensions: [any Sendable] = []
+        /// How the host listens for the guest's stdio dial-backs. `.pooled`
+        /// (the default) pre-binds a fixed range of listeners for the VM's
+        /// whole life, for hosts where cloud-hypervisor cannot see socket
+        /// files created after it starts (apple/container's
+        /// `--virtualization` mode). `.perStream` binds each port only while
+        /// its stream waits for the guest, and closes it afterwards, so the
+        /// guest cannot connect to an idle stdio port at all; it requires a
+        /// host where cloud-hypervisor sees new socket files.
+        public var stdioListeners: StdioListenerMode = .pooled
 
         public init() {
             self.cpus = 4
@@ -262,7 +277,9 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
                 // Pre-bind the stdio vsock listener pool before launching CH.
                 // CH inherits a fs snapshot at fork time and is blind to
                 // anything we add to workDir after — see `_stdioPool` doc.
-                try self.prebindStdioPool()
+                if self.config.stdioListeners == .pooled {
+                    try self.prebindStdioPool()
+                }
 
                 try await self.chProcess.start()
 
@@ -421,6 +438,9 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
     }
 
     public func listen(_ port: UInt32) throws -> VsockListener {
+        if config.stdioListeners == .perStream {
+            return try listenForOneStream(port)
+        }
         if let slot = _stdioPool.withLock({ $0[port] }) {
             return try lend(slot)
         }
@@ -447,6 +467,42 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
         let slot = CHStdioPortSlot(port: port, path: path, listenFd: listenFd)
         _stdioPool.withLock { $0[port] = slot }
         return try lend(slot)
+    }
+
+    /// `.perStream`: a listener bound for this stream alone. When the stream's
+    /// listener finishes, the socket file is removed (if it is still this
+    /// slot's) and the slot shut down, so a later dial to the port finds no
+    /// socket and cloud-hypervisor refuses it.
+    private func listenForOneStream(_ port: UInt32) throws -> VsockListener {
+        let path = chVsockListenSocketPath(baseSocket: workDir.appendingPathComponent("vsock.sock"), port: port)
+        let listenFd = try chVsockBindListener(at: path)
+        let slot = CHStdioPortSlot(port: port, path: path, listenFd: listenFd)
+        _stdioPool.withLock { $0[port] = slot }
+        let listener = VsockListener(port: port) { [weak self, slot, logger] _ in
+            logger?.debug("vsock listen closing per-stream port=\(slot.port)")
+            slot.relinquish()
+            // The fd is still open here (the accept loop closes it only after
+            // shutdown), so its inode identifies this slot's file: a newer
+            // listener for the same port is never unlinked.
+            var named = stat(), open = stat()
+            if lstat(slot.path.path, &named) == 0, fstat(slot.listenFd, &open) == 0,
+               named.st_dev == open.st_dev, named.st_ino == open.st_ino {
+                unlink(slot.path.path)
+            }
+            slot.shutdown()
+            self?._stdioPool.withLock { pool in
+                if pool[slot.port] === slot { pool[slot.port] = nil }
+            }
+        }
+        do {
+            try slot.claim(by: listener)
+        } catch {
+            unlink(path.path)
+            slot.shutdown()
+            throw error
+        }
+        slot.startAcceptingIfNeeded(logger: logger)
+        return listener
     }
 
     /// Lend `slot` to a fresh listener for the duration of one stdio stream.

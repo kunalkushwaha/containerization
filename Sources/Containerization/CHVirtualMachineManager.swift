@@ -33,6 +33,7 @@ public struct CHVirtualMachineManager: VirtualMachineManager {
     private let runtimeRoot: URL
     private let group: (any EventLoopGroup)?
     private let logger: Logger?
+    private let stdioListeners: CHVirtualMachineInstance.StdioListenerMode
 
     /// - Parameters:
     ///   - kernel: The Linux kernel image used for every VM this manager creates.
@@ -60,8 +61,10 @@ public struct CHVirtualMachineManager: VirtualMachineManager {
         virtiofsdBinary: URL? = nil,
         runtimeRoot: URL? = nil,
         group: (any EventLoopGroup)? = nil,
-        logger: Logger? = nil
+        logger: Logger? = nil,
+        stdioListeners: CHVirtualMachineInstance.StdioListenerMode = .pooled
     ) throws {
+        self.stdioListeners = stdioListeners
         self.kernel = kernel
         self.initialFilesystem = initialFilesystem
         self.chBinary = try Self.resolveBinary(chBinary, name: "cloud-hypervisor")
@@ -104,6 +107,7 @@ public struct CHVirtualMachineManager: VirtualMachineManager {
         instanceConfig.extensions = vmConfig.extensions
         instanceConfig.kernel = kernel
         instanceConfig.initialFilesystem = initialFilesystem
+        instanceConfig.stdioListeners = stdioListeners
 
         return try CHVirtualMachineInstance(
             group: group,
