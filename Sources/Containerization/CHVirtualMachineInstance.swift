@@ -476,17 +476,24 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
     private func listenForOneStream(_ port: UInt32) throws -> VsockListener {
         let path = chVsockListenSocketPath(baseSocket: workDir.appendingPathComponent("vsock.sock"), port: port)
         let listenFd = try chVsockBindListener(at: path)
+        // The socket file's own identity (a socket fd's fstat names its
+        // sockfs inode, not the file), so only this stream's file is removed.
+        var bound = stat()
+        guard lstat(path.path, &bound) == 0 else {
+            _ = close(listenFd)
+            throw ContainerizationError(.internalError, message: "vsock port \(port): socket file vanished after bind")
+        }
+        let (boundDevice, boundInode) = (bound.st_dev, bound.st_ino)
         let slot = CHStdioPortSlot(port: port, path: path, listenFd: listenFd)
         _stdioPool.withLock { $0[port] = slot }
         let listener = VsockListener(port: port) { [weak self, slot, logger] _ in
             logger?.debug("vsock listen closing per-stream port=\(slot.port)")
             slot.relinquish()
-            // The fd is still open here (the accept loop closes it only after
-            // shutdown), so its inode identifies this slot's file: a newer
-            // listener for the same port is never unlinked.
-            var named = stat(), open = stat()
-            if lstat(slot.path.path, &named) == 0, fstat(slot.listenFd, &open) == 0,
-               named.st_dev == open.st_dev, named.st_ino == open.st_ino {
+            // Removing the file first means a later dial finds no socket at
+            // once; the accept loop closes the fd on its next wakeup. A newer
+            // listener for the same port has another file, and is kept.
+            var named = stat()
+            if lstat(slot.path.path, &named) == 0, named.st_dev == boundDevice, named.st_ino == boundInode {
                 unlink(slot.path.path)
             }
             slot.shutdown()
