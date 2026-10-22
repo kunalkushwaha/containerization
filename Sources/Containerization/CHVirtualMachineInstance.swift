@@ -278,12 +278,29 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
                 }
 
                 self._state.withLock { $0 = .running }
+                self.watchVMMExit()
             } catch {
                 self.logger?.warning("CH VM start failed; tearing down partial resources: \(error)")
                 await self.teardownAfterFailedStart()
                 self._state.withLock { $0 = .stopped }
                 throw error
             }
+        }
+    }
+
+    /// When cloud-hypervisor exits while the VM is running (killed, crashed,
+    /// or the guest powered off), the VM is stopped: `stop()` runs its
+    /// teardown (its REST calls fail fast, the process is already reaped)
+    /// and the state becomes `.stopped`. Without this the state stayed
+    /// `.running` with no VMM behind it. A `stop()` already in progress holds
+    /// the lock and sets the state itself; this one then finds nothing to do.
+    private func watchVMMExit() {
+        Task.detached { [weak self] in
+            guard let self else { return }
+            let reason = await self.chProcess.wait()
+            guard self.state == .running else { return }
+            self.logger?.warning("cloud-hypervisor exited while the VM was running (\(reason)); stopping the VM")
+            try? await self.stop()
         }
     }
 
