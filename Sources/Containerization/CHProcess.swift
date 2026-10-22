@@ -55,6 +55,10 @@ final class CHProcess: Sendable {
     private let config: Config
     private let logger: Logger?
     private let state: Mutex<State>
+    private let exited = Mutex(false)
+
+    /// Whether the process has exited (and been reaped).
+    var hasExited: Bool { exited.withLock { $0 } }
 
     init(config: Config, logger: Logger?) {
         self.config = config
@@ -102,7 +106,8 @@ final class CHProcess: Sendable {
             throw error
         }
 
-        let exitTask = Task<ExitReason, Never>.detached { [command, logger] in
+        let exitTask = Task<ExitReason, Never>.detached { [command, logger, weak self] in
+            defer { self?.exited.withLock { $0 = true } }
             do {
                 let status = try command.wait()
                 if status >= 128 {

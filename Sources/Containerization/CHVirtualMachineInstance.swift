@@ -350,9 +350,12 @@ extension CHVirtualMachineInstance: VirtualMachineInstance {
             }
 
             // Best-effort graceful shutdown via REST. The CH process may
-            // already be on its way out, so swallow errors from these.
-            _ = try? await chCall { try await self.client.vmShutdown() }
-            _ = try? await chCall { try await self.client.vmmShutdown() }
+            // already be on its way out, so swallow errors from these; if it
+            // has already exited (watchVMMExit), there is no one to ask.
+            if !self.chProcess.hasExited {
+                _ = try? await chCall { try await self.client.vmShutdown() }
+                _ = try? await chCall { try await self.client.vmmShutdown() }
+            }
 
             await self.chProcess.terminate(graceSeconds: 10)
             await self.hotplug.shutdown()
