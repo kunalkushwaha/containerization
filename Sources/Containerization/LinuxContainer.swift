@@ -741,6 +741,14 @@ extension LinuxContainer {
                     "lowerdir=\(lowerPath)",
                     "upperdir=\(upperPath)",
                     "workdir=\(workPath)",
+                    // The image and the writable layer are different
+                    // filesystems. Without xino, overlayfs reports its own
+                    // st_dev for directories but the layer's for every other
+                    // file, so a tree reads as crossing devices at each file
+                    // (and a walker that stays on one filesystem refuses it).
+                    // With xino every object reports the overlay's st_dev; a
+                    // real mount below the root still reports its own.
+                    "xino=on",
                 ]
             )
             try await agent.mount(overlayMount)
